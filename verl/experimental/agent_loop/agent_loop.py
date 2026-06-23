@@ -529,22 +529,8 @@ class AgentLoopWorkerBase:
         ) or not self.config.reward_model.enable
         ##### DISABLE ASYNC REWARD
         enable_async_reward = False
-        
-        # print(f"Keys in output.extra_fields: {list(output.extra_fields.keys())}")
-        # print(f"check if output has key 'attention_score': {output.attention_score}")
+
         if output.reward_score is None and enable_async_reward:
-            if "attention_score" in output:
-                batch = TensorDict(
-                    {
-                        "prompts": prompt_output["input_ids"],  # [1, prompt_length]
-                        "responses": response_output["input_ids"],  # [1, response_length]
-                        "attention_mask": attention_mask,  # [1, prompt_length + response_length]
-                        "input_ids": input_ids,  # [1, prompt_length + response_length]
-                        "position_ids": position_ids,
-                    },
-                    batch_size=1,
-                )
-                
             batch = TensorDict(
                 {
                     "prompts": prompt_output["input_ids"],  # [1, prompt_length]

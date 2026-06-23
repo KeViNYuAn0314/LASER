@@ -594,13 +594,8 @@ class RayPPOTrainer:
                 
             torch.cuda.empty_cache()
             self.actor_rollout_wg.set_tokenizer(self.tokenizer)
-            if self.config.trainer.get("run_ablation", False):
-                batch_attentions = self.actor_rollout_wg.compute_attentions_reflection_v(test_output_gen_batch_padded)
-            else:
-                batch_attentions = self.actor_rollout_wg.compute_attentions(test_output_gen_batch_padded)
-                # batch_attentions = self.actor_rollout_wg.compute_attentions_reflection_v(test_output_gen_batch_padded)
+            batch_attentions = self.actor_rollout_wg.compute_attentions(test_output_gen_batch_padded)
             test_output_gen_batch_padded = test_output_gen_batch_padded.union(batch_attentions)
-            # print(f"keys of test_output_gen_batch_padded: {test_output_gen_batch_padded.batch.keys()}")
 
             # unpad
             test_output_gen_batch = unpad_dataproto(test_output_gen_batch_padded, pad_size=pad_size)
@@ -622,8 +617,6 @@ class RayPPOTrainer:
             reward_tensor = result["reward_tensor"]
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
-            
-            # print(f"result reward extra info keys: {result.get('reward_extra_info', {}).keys()}")
 
             reward_extra_infos_dict["reward"].extend(scores)
             if "reward_extra_info" in result:
@@ -1103,14 +1096,9 @@ class RayPPOTrainer:
                     batch = batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
                     batch = batch.union(gen_batch_output)
                     
-                    print(f"start computing attention reward ...")
                     torch.cuda.empty_cache()
                     attention_start_step = self.config.trainer.get("attention_start_step", 20)
-                    if self.global_steps >= attention_start_step and self.config.trainer.get("run_ablation", False):
-                        self.actor_rollout_wg.set_tokenizer(self.tokenizer)
-                        batch_attentions = self.actor_rollout_wg.compute_attentions_reflection_v(batch)
-                        batch = batch.union(batch_attentions)
-                    elif self.global_steps >= attention_start_step and self.config.trainer.get("enable_attention", False):
+                    if self.global_steps >= attention_start_step and self.config.trainer.get("enable_attention", False):
                         self.actor_rollout_wg.set_tokenizer(self.tokenizer)
                         batch_attentions = self.actor_rollout_wg.compute_attentions(batch)
                         batch = batch.union(batch_attentions)

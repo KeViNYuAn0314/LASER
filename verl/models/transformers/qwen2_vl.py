@@ -174,22 +174,6 @@ def get_rope_index(
     return position_ids
 
 
-# def prepare_fa2_from_position_ids(
-#     query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, position_ids: torch.Tensor
-# ):
-#     assert position_ids.ndim == 2  # (batch_size, seq_length)
-#     query = query.contiguous().view(-1, query.size(-2), query.size(-1))
-#     key = key.contiguous().view(-1, key.size(-2), key.size(-1))
-#     value = value.contiguous().view(-1, value.size(-2), value.size(-1))
-#     position_ids = position_ids.view(-1)
-#     cu_seqlens = torch.cat(
-#         (
-#             (position_ids == 0).nonzero().view(-1).to(torch.int32),
-#             torch.tensor(position_ids.size(), device=position_ids.device, dtype=torch.int32),
-#         )
-#     )
-#     max_length = cu_seqlens.diff().max()  # use cu_seqlens to infer max_length for qwen2vl mrope
-#     return (query, key, value, (cu_seqlens, cu_seqlens), (max_length, max_length))
 def prepare_fa2_from_position_ids(
     query: torch.Tensor, key: torch.Tensor, value: torch.Tensor, position_ids: torch.Tensor
 ):
@@ -208,214 +192,6 @@ def prepare_fa2_from_position_ids(
     return (query, key, value, indices_q, (cu_seqlens, cu_seqlens), (max_length, max_length))
 
 
-def _custom_flash_attention_forward(
-    query_states: torch.Tensor,
-    key_states: torch.Tensor,
-    value_states: torch.Tensor,
-    attention_mask: Optional[torch.Tensor],
-    query_length: int,
-    is_causal: bool = True,
-    position_ids: Optional[torch.Tensor] = None,
-    sliding_window: Optional[int] = None,
-    use_top_left_mask: bool = False,
-    deterministic: Optional[bool] = None,
-    **kwargs,
-):
-    """
-    Patches flash attention forward to handle 3D position ids in mrope. (3, batch_size, seq_length)
-    """
-    # Assuming 4D tensors, key_states.shape[1] is the key/value sequence length (source length).
-    use_sliding_windows = (
-        _flash_supports_window_size and sliding_window is not None and key_states.shape[1] > sliding_window
-    )
-    flash_kwargs = {"window_size": (sliding_window, sliding_window)} if use_sliding_windows else {}
-
-    if _flash_supports_deterministic:
-        flash_kwargs["deterministic"] = deterministic if deterministic is not None else _flash_deterministic_enabled
-
-    if kwargs.get("softcap") is not None:
-        flash_kwargs["softcap"] = kwargs.pop("softcap")
-
-    query_states, key_states, value_states = fa_peft_integration_check(
-        query_states, key_states, value_states, target_dtype=torch.bfloat16
-    )
-
-    # print(f"query states in custom flash attention forward is {query_states}")
-
-    if position_ids is not None:
-        assert position_ids.ndim == 2  # (batch_size, seq_length / sp_size)
-
-    sp_size = get_ulysses_sequence_parallel_world_size()
-    if sp_size > 1:
-        # qkv: (batch_size, seq_length / sp_size, num_head, head_size)
-        validate_ulysses_config(query_states.size(2), sp_size)
-        query_states = gather_seq_scatter_heads(query_states, seq_dim=1, head_dim=2)
-        key_states = gather_seq_scatter_heads(key_states, seq_dim=1, head_dim=2)
-        value_states = gather_seq_scatter_heads(value_states, seq_dim=1, head_dim=2)
-        position_ids_lst = [torch.empty_like(position_ids) for _ in range(sp_size)]
-        position_ids = dist.all_gather(position_ids_lst, position_ids, group=get_ulysses_sequence_parallel_group())
-        position_ids = torch.cat(position_ids_lst, dim=-1)  # (batch_size, seq_length)
-
-    if position_ids is not None and query_length != 1 and not (torch.diff(position_ids, dim=-1) >= 0).all():
-        batch_size = query_states.size(0)
-        q, k, v, (cu_seqlens_q, cu_seqlens_k), (max_seqlen_q, max_seqlen_k) = prepare_fa2_from_position_ids(
-            query_states, key_states, value_states, position_ids
-        )
-        # print(f"in custom flash attention forward q is {q}")
-        attn_output = flash_attn_varlen_func(
-            q=q,
-            k=k,
-            v=v,
-            cu_seqlens_q=cu_seqlens_q,
-            cu_seqlens_k=cu_seqlens_k,
-            max_seqlen_q=max_seqlen_q,
-            max_seqlen_k=max_seqlen_k,
-            dropout_p=kwargs.pop("dropout", 0.0),
-            softmax_scale=kwargs.pop("softmax_scale", None),
-            causal=is_causal,
-            **flash_kwargs,
-        )
-        attn_output = attn_output.view(batch_size, -1, attn_output.size(-2), attn_output.size(-1))
-    else:
-        attn_output = _flash_attention_forward(
-            query_states,
-            key_states,
-            value_states,
-            attention_mask,
-            query_length,
-            is_causal=is_causal,
-            sliding_window=sliding_window,
-            use_top_left_mask=use_top_left_mask,
-            deterministic=deterministic,
-            **kwargs,
-        )  # do not pass position_ids to old flash_attention_forward
-
-    if sp_size > 1:
-        # (batch_size, seq_length, num_head, head_size)
-        attn_output = gather_heads_scatter_seq(attn_output, head_dim=2, seq_dim=1)
-
-    return attn_output
-
-
-# def qwen2_vl_attn_forward(
-#     self: "Qwen2VLAttention",
-#     hidden_states: torch.Tensor,
-#     attention_mask: Optional[torch.Tensor] = None,
-#     position_ids: Optional[torch.LongTensor] = None,
-#     position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,  # will become mandatory in v4.46
-#     **kwargs,
-# ) -> tuple[torch.Tensor, None, None]:
-#     from transformers.models.qwen2_vl.modeling_qwen2_vl import apply_multimodal_rotary_pos_emb, repeat_kv
-
-#     bsz, q_len, _ = hidden_states.size()  # q_len = seq_length / sp_size
-#     query_states = self.q_proj(hidden_states)  # (batch_size, seq_length / sp_size, num_heads * head_size)
-#     key_states = self.k_proj(hidden_states)
-#     value_states = self.v_proj(hidden_states)
-
-#     query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
-#     key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-#     value_states = value_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
-
-#     # Because the input can be padded, the absolute sequence length depends on the max position id.
-#     cos, sin = position_embeddings
-#     query_states, key_states = apply_multimodal_rotary_pos_emb(
-#         query_states, key_states, cos, sin, self.rope_scaling["mrope_section"]
-#     )
-#     key_states = repeat_kv(key_states, self.num_key_value_groups)
-#     value_states = repeat_kv(value_states, self.num_key_value_groups)
-#     dropout_rate = 0.0 if not self.training else self.attention_dropout
-
-#     sliding_window = None
-#     if (
-#         self.config.use_sliding_window
-#         and getattr(self.config, "sliding_window", None) is not None
-#         and self.layer_idx >= self.config.max_window_layers
-#     ):
-#         sliding_window = self.config.sliding_window
-
-
-#     # ========== ADD ATTENTION WEIGHTS COMPUTATION ==========
-#     attn_weights = None
-#     if kwargs.get("output_attentions", False):
-#         # Compute attention weights BEFORE transpose
-#         # query_states, key_states, value_states are in [batch, heads, seq, dim]
-#         scaling = 1.0 / (self.head_dim ** 0.5)
-        
-#         # Compute attention scores
-#         attn_scores = torch.matmul(query_states, key_states.transpose(-2, -1)) * scaling
-#         # Shape: [batch, heads, seq, seq]
-#         print(f"attn_scores is {attn_scores}")
-        
-#         # Apply causal mask if needed
-#         # if getattr(self, "is_causal", True):
-#         #     causal_mask = torch.triu(
-#         #         torch.full((q_len, q_len), float('-inf'), 
-#         #                   device=query_states.device, 
-#         #                   dtype=query_states.dtype),
-#         #         diagonal=1
-#         #     )
-#         #     print(f"causal mask is {causal_mask}")
-#         #     attn_scores = attn_scores + causal_mask[None, None, :, :]
-        
-#         # Apply attention mask if provided
-#         if attention_mask is not None:
-#             if attention_mask.dim() == 2:
-#                 # Expand mask: [batch, seq] -> [batch, 1, 1, seq]
-#                 expanded_mask = attention_mask[:, None, None, :].to(dtype=query_states.dtype)
-#                 inverted_mask = (1.0 - expanded_mask) * torch.finfo(query_states.dtype).min
-#                 attn_scores = attn_scores + inverted_mask
-#             elif attention_mask.dim() == 4:
-#                 attn_scores = attn_scores + attention_mask
-#         elif getattr(self, "is_causal", True):
-#             causal_mask = torch.triu(
-#                 torch.full((q_len, q_len), float('-inf'), 
-#                           device=query_states.device, 
-#                           dtype=query_states.dtype),
-#                 diagonal=1
-#             )
-#             print(f"causal mask is {causal_mask}")
-#             attn_scores = attn_scores + causal_mask[None, None, :, :]
-        
-#         # Softmax to get attention weights
-#         attn_weights_full = F.softmax(attn_scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
-#         # Shape: [batch, heads, seq, seq]
-#         print(f"attn_weights_full is {attn_weights_full}")
-        
-#         # Average across heads for output
-#         attn_weights = attn_weights_full.mean(dim=1)
-#         # Shape: [batch, seq, seq]
-#     # ========== END ATTENTION WEIGHTS COMPUTATION ==========
-
-#     # This is before the transpose
-#     q_len = query_states.shape[2]
-
-#     # FA2 uses non-transposed inputs
-#     query_states = query_states.transpose(1, 2)
-#     key_states = key_states.transpose(1, 2)
-#     value_states = value_states.transpose(1, 2)
-
-#     if position_ids.ndim == 3:
-#         position_ids = position_ids[0]
-
-#     attn_output = _custom_flash_attention_forward(
-#         query_states,
-#         key_states,
-#         value_states,
-#         attention_mask,
-#         query_length=q_len,
-#         is_causal=getattr(self, "is_causal", True),
-#         dropout=dropout_rate,
-#         sliding_window=sliding_window,
-#         use_top_left_mask=_flash_use_top_left_mask,
-#         position_ids=position_ids,  # important: pass position ids
-#     )  # (batch_size, seq_length / sp_size, num_head, head_size)
-#     attn_output = attn_output.reshape(bsz, q_len, self.hidden_size).contiguous()
-#     attn_output = self.o_proj(attn_output)
-#     if is_transformers_version_in_range(min_version="4.54.0"):
-#         return attn_output, attn_weights
-#     else:
-#         return attn_output, attn_weights, None
-
 @torch.no_grad()
 def get_full_attention(
         self, 
@@ -429,8 +205,6 @@ def get_full_attention(
         import math
         
         bsz, q_len, _ = hidden_states.size()
-        
-        # print(f"hidden_states in get_full_attention is {hidden_states}")
 
         query_states = self.q_proj(hidden_states)
         key_states = self.k_proj(hidden_states)
@@ -484,9 +258,7 @@ def get_full_attention(
             )
             attn_scores = attn_scores + causal_mask
         attn_scores = attn_scores + causal_mask
-        
-        # print(f"attn_scores is {attn_scores}")
-        
+
         # Apply softmax to get probabilities
         attn_weights = F.softmax(attn_scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
         # Result: [batch, heads, seq_len, seq_len]
@@ -615,9 +387,6 @@ def qwen2_5_vl_attention_forward(
             cache_kwargs = {"sin": sin, "cos": cos, "cache_position": cache_position}  # Specific to RoPE models
             key_states, value_states = past_key_values.update(key_states, value_states, self.layer_idx, cache_kwargs)
 
-        # attention_interface: Callable = eager_attention_forward
-        # if self.config._attn_implementation != "eager":
-            # attention_interface = ALL_ATTENTION_FUNCTIONS[self.config._attn_implementation]
         attention_interface = qwen2_5_vl_flash_attention_forward
 
         attn_output, attn_weights = attention_interface(
@@ -735,9 +504,8 @@ def qwen2_5_vl_text_model_forward(
         all_hidden_states = () if output_hidden_states else None
         all_self_attns = () if output_attentions else None
         
-        # selected layer is the odd layers
+        # capture attentions from every 3rd transformer layer
         SELECTED_LAYERS = [i for i in range(len(self.layers)) if i % 3 == 0]
-        # print(f"SELECTED_LAYERS for attentions are {SELECTED_LAYERS}")
 
         for idx, decoder_layer in enumerate(self.layers):
             if output_hidden_states:
@@ -882,7 +650,6 @@ def qwen2_vl_attn_forward(
     attention_mask: Optional[torch.Tensor] = None,
     position_ids: Optional[torch.LongTensor] = None,
     position_embeddings: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
-    # output_attentions: bool = False,  # Added parameter
     **kwargs,
 ) -> tuple[torch.Tensor, Optional[torch.Tensor], None]:  # Modified return type
     from transformers.models.qwen2_vl.modeling_qwen2_vl import apply_multimodal_rotary_pos_emb, repeat_kv
@@ -929,10 +696,6 @@ def qwen2_vl_attn_forward(
     else:
         cos, sin = position_embeddings
 
-    # print(f"first 5 query states before rope: {query_states[0,0,:5,:5]}")
-    # print(f"last 5 query states before rope: {query_states[0,0,-5:,-5:]}")
-    # print(f"first 5 key states before rope: {key_states[0,0,:5,:5]}")
-    # print(f"last 5 key states before rope: {key_states[0,0,-5:,-5:]}")
     query_states, key_states = apply_multimodal_rotary_pos_emb(
         query_states, key_states, cos, sin, self.rope_scaling["mrope_section"]
     )
@@ -1121,10 +884,8 @@ def forward_with_normal_backend(
     outputs = qwen2_vl_forward(self, input_ids, **kwargs)
     hidden_states = outputs[0]
     output_attentions = kwargs.get("output_attentions", False)
-    # print(f"here output_attentions: {output_attentions}")
     if output_attentions:
         attn_weigths = outputs[1]
-    # print(f"here attnetion weights: {attn_weigths if output_attentions else 'None'}")
     logits = self.lm_head(hidden_states)
 
     return Qwen2VLCausalLMOutputWithPast(
@@ -1147,10 +908,8 @@ def forward_with_torch_backend(
     hidden_states = outputs[0]
     
     output_attentions = kwargs.get("output_attentions", False)
-    # print(f"here output_attentions: {output_attentions}")
     if output_attentions:
         attn_weigths = outputs[1]
-    # print(f"here attention weights: {attn_weigths if output_attentions else 'None'}")
 
     # Loss calculations
     if labels is not None:

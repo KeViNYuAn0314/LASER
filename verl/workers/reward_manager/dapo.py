@@ -113,24 +113,8 @@ class DAPORewardManager(AbstractRewardManager):
                 extra_info=extra_info,
             )
 
-            # print("Computing score...", flush=True)
-
-            # if "attention_score" in data_item.batch:
-            #     print("detect attention score in batch")
-            #     attention_score = data_item.batch["attention_score"]
-            #     result["attention_score"] = attention_score.item()
-            # else: 
-            #     print("no attention score detected in batch")
-                
             score: float
             if isinstance(result, dict):
-                # if "attention_score" in result:
-                #     score=result["score"] + 0.5 * result["attention_score"] * result['accuracy']
-                #     print(f"detect attention score {result['attention_score']}, final score is {score}")
-                # else:
-                #     print(f"no attention score detected")
-                #     score = result["score"]
-
                 # Store the information including original reward
                 score = result["score"]
                 for key, value in result.items():

@@ -55,16 +55,12 @@ class DAPORewardLoopManager(RewardLoopManagerBase):
         data_source = data_item.non_tensor_batch["data_source"]
         ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
         extra_info = data_item.non_tensor_batch.get("extra_info", {})
-        
-        print(f"keys in data_item.batch: {data_item.batch.keys()}")
+
         if "attention_score" in data_item.batch:
-            print(f"Detect attention score in dapo reward loop")
             attention_score = data_item.batch["attention_score"].item()
             if extra_info is None:
                 extra_info = {}
             extra_info["attention_score"] = attention_score
-        else: 
-            print(f"No attention score detected in dapo reward loop")
 
         response_str = await self.loop.run_in_executor(
             None, lambda: self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)

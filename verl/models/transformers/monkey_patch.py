@@ -289,7 +289,6 @@ def apply_monkey_patch(
         print("Monkey patch state_dict in AutoModelForCausalLMWithValueHead. ")
 
     # TODO: VLM models only, unify monkey patch to LLM models.
-    # print("In the apply monkey patch function.")
     if model.config.model_type in ["qwen2_5_vl", "qwen2_vl"]:
         # Step 1: patch model to support image-text mixed data
         if is_transformers_version_in_range(min_version="4.52.0"):
@@ -311,14 +310,6 @@ def apply_monkey_patch(
 
             Qwen2_5_VLModel = SimpleNamespace(forward=None)
             Qwen2VLModel = SimpleNamespace(forward=None)
-
-        from verl.models.transformers.qwen2_vl import forward_with_normal_backend, qwen2_vl_base_forward
-
-        # Qwen2_5_VLModel.forward = qwen2_vl_base_forward
-        # Qwen2VLModel.forward = qwen2_vl_base_forward
-        # Qwen2_5_VLForConditionalGeneration.forward = forward_with_normal_backend
-        # Qwen2VLForConditionalGeneration.forward = forward_with_normal_backend
-        # print(f"Monkey patch {model.__class__.__name__} model forward")
 
         # Step 2: patch attention to support ulysses parallelism
         if is_transformers_version_in_range(min_version="4.54.0"):

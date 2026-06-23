@@ -146,9 +146,6 @@ def load_reward_manager(
     # By default reward_manager is set to naive (NaiveRewardManager)
     reward_manager_name = config.reward_model.get("reward_manager", "naive")
     reward_manager_cls = get_reward_manager_cls(reward_manager_name)
-    
-    # print(f"reward manager class name is {reward_manager_cls.__name__}", flush=True)
-    # print(f"Imported file directory is {inspect.getfile(reward_manager_cls)}", flush=True)
 
     if compute_score is None:
         sandbox_config = config.reward_model.get("sandbox_fusion")

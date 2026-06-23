@@ -23,7 +23,6 @@ try:
 except ImportError:
     class _MVTimeout(Exception):
         pass
-from sympy import pi
 
 # ============================================================
 # Regex Patterns
@@ -44,8 +43,6 @@ BOXED_PATTERN = re.compile(
 # MCQ pattern: matches A, (A), A., etc.
 MCQ_PATTERN = re.compile(r"^\(?([A-Za-z])\)?\.?\s*$")
 
-# Format check pattern
-FORMAT_PATTERN = re.compile(r"<think>.*?</think>\s*<answer>.*?</answer>", re.DOTALL)
 MIXED_NUMBER_PATTERN = re.compile(r"([0-9]) +([0-9])")
 
 # ============================================================
@@ -451,11 +448,6 @@ def _normalize_for_comparison(expr: str) -> str:
 # Main Reward Functions
 # ============================================================
 
-def r1v_format_reward(predict_str: str) -> float:
-    """Check if model output follows <think>...</think><answer>...</answer> format."""
-    return 1.0 if FORMAT_PATTERN.fullmatch(predict_str) else 0.0
-
-
 def r1v_accuracy_reward(
     predict_str: str,
     ground_truth: str,
@@ -539,15 +531,6 @@ def r1v_accuracy_reward(
                 if _safe_verify(gt_parsed, pred_parsed, float_rounding=float_rounding, timeout_sec=timeout_sec):
                     return 1.0
         
-        # # ---- Step 6: Fallback - try GT without \boxed{} wrapper ----
-        # # Some GT formats parse better without wrapping (e.g., plain "42")
-        # if not gt_parsed:
-        #     gt_parsed = _safe_parse(ground_truth)
-        #     if gt_parsed and pred_parsed:
-        #         float_rounding = _compute_float_rounding(pred_answer, ground_truth)
-        #         if _safe_verify(gt_parsed, pred_parsed, float_rounding=float_rounding, timeout_sec=timeout_sec):
-        #             return 1.0
-        
         # ---- Step 6: Normalized string fallback ----
         pred_norm = _normalize_for_comparison(pred_answer)
         gt_norm = _normalize_for_comparison(ground_truth)
@@ -558,7 +541,6 @@ def r1v_accuracy_reward(
     
     except Exception as e:
         # Log for debugging and alerting, not print
-        # print(f"Error in r1v_accuracy_reward: {e}")
         signal.alarm(0)  # Ensure no lingering alarms
         
         return 0.0

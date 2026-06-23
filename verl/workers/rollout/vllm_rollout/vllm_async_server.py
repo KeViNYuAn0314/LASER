@@ -36,8 +36,6 @@ from vllm.lora.request import LoRARequest
 from vllm.outputs import RequestOutput
 from vllm.usage.usage_lib import UsageContext
 from vllm.utils import FlexibleArgumentParser, get_tcp_uri
-# from vllm.utils.argparse_utils import FlexibleArgumentParser
-# from vllm.utils.network_utils import get_tcp_uri
 from vllm.v1.engine.async_llm import AsyncLLM
 from vllm.v1.engine.core import EngineCoreProc
 from vllm.v1.engine.utils import CoreEngineProcManager
@@ -255,8 +253,7 @@ class vLLMHttpServerBase:
             "hf_overrides": {"quantization_config": fp8_block_quant_kwargs} if quantization == "fp8" else None,
             **engine_kwargs,
         }
-        
-        # if self.config.enable_sleep_mode is not None and not self.config.enable_sleep_mode:
+
         if "enable_sleep_mode" in engine_kwargs and not engine_kwargs["enable_sleep_mode"]:
             args['enable_sleep_mode'] = False
 

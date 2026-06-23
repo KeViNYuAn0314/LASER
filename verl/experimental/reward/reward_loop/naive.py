@@ -52,10 +52,10 @@ class NaiveRewardLoopManager(RewardLoopManagerBase):
         extra_info["rollout_reward_scores"] = rollout_reward_scores
         
         if "attention_score" in data_item.batch:
-                attention_score = data_item.batch["attention_score"].item()
-                if extra_info is None:
-                    extra_info = {}
-                extra_info["attention_score"] = attention_score
+            attention_score = data_item.batch["attention_score"].item()
+            if extra_info is None:
+                extra_info = {}
+            extra_info["attention_score"] = attention_score
 
         response_str = await self.loop.run_in_executor(
             None, lambda: self.tokenizer.decode(valid_response_ids, skip_special_tokens=True)

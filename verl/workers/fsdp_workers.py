@@ -912,46 +912,6 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         return output
     
     @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="actor"))
-    @DistProfiler.annotate(color="blue", role="actor_compute_attentions_reflection_v")
-    def compute_attentions_reflection_v(self, data):
-        assert self._is_actor
-        if self._is_offload_param:
-            load_fsdp_model_to_gpu(self.actor_module_fsdp)
-
-        # Support all hardwares
-        from contextlib import nullcontext
-
-        is_lora = data.meta_info.pop("is_lora", False)
-        adapter_ctx = self.actor.actor_module.disable_adapter() if is_lora else nullcontext()
-        
-        # Need to compute output attentions from the model as rollout doesn't support it yet
-        data.meta_info["compute_output_attentions"] = True
-        data.meta_info["micro_batch_size"] = self.config.rollout.log_prob_micro_batch_size
-        
-        timing_generate = {}
-        # with simple_timer("generate_attentions", timing_generate):
-        data.meta_info["micro_batch_size"] = self.config.rollout.log_prob_micro_batch_size_per_gpu
-        data.meta_info["max_token_len"] = self.config.rollout.log_prob_max_token_len_per_gpu
-        data.meta_info["use_dynamic_bsz"] = self.config.rollout.log_prob_use_dynamic_bsz
-        data.meta_info["temperature"] = self.config.rollout.temperature
-        with self.ulysses_sharding_manager:
-            with adapter_ctx:
-                attention_scores = self.actor.generate_attentions_reflection_v(data=data)
-                output = DataProto.from_dict(
-                    tensors={"attention_score": attention_scores},
-                )
-                    
-        output = output.to("cpu")
-        if self.world_size > 1 and fsdp_version(self.actor.actor_module) == 1:
-            self.actor.actor_module._handle.reshard(True)
-
-        if self._is_offload_param:
-            offload_fsdp_model_to_cpu(self.actor_module_fsdp)
-            log_gpu_memory_usage("After offload actor model during compute_attentions", logger=logger)
-
-        return output
-    
-    @register(dispatch_mode=make_nd_compute_dataproto_dispatch_fn(mesh_name="actor"))
     @DistProfiler.annotate(color="blue", role="actor_compute_attentions")
     def compute_attentions(self, data):
         assert self._is_actor
@@ -966,19 +926,12 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         
         # Need to compute output attentions from the model as rollout doesn't support it yet
         data.meta_info["compute_output_attentions"] = True
-        data.meta_info["micro_batch_size"] = self.config.rollout.log_prob_micro_batch_size
-        
-        timing_generate = {}
-        # with simple_timer("generate_attentions", timing_generate):
         data.meta_info["micro_batch_size"] = self.config.rollout.log_prob_micro_batch_size_per_gpu
         data.meta_info["max_token_len"] = self.config.rollout.log_prob_max_token_len_per_gpu
         data.meta_info["use_dynamic_bsz"] = self.config.rollout.log_prob_use_dynamic_bsz
         data.meta_info["temperature"] = self.config.rollout.temperature
         with self.ulysses_sharding_manager:
             with adapter_ctx:
-                # attention_scores = self.actor.generate_attentions(data=data)
-                
-                
                 _attn_kwargs = dict(
                     data=data,
                     apply_rectification=self.config.actor.get("apply_rectification", False),
@@ -997,8 +950,7 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
                 output = DataProto.from_dict(
                     tensors={"attention_score": attention_scores, "suppression_attention_score": suppression_attention_scores},
                 )
-                # print(f"attentions shape: {attentions.shape}")
-                    
+
         output = output.to("cpu")
         if self.world_size > 1 and fsdp_version(self.actor.actor_module) == 1:
             self.actor.actor_module._handle.reshard(True)
@@ -1063,9 +1015,6 @@ class ActorRolloutRefWorker(Worker, DistProfilerExtension):
         assert self._is_ref
         # else:
         # otherwise, the class have a standalone ref model
-        # print(f"sfdp version of actor module: {fsdp_version(self.actor.actor_module)}")
-        # print(f"sfdp version of ref module: {fsdp_version(self.ref_policy.actor_module)}")
-
         micro_batch_size = self.config.ref.log_prob_micro_batch_size_per_gpu
         data.meta_info["micro_batch_size"] = micro_batch_size
         data.meta_info["temperature"] = self.config.rollout.temperature

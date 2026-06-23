@@ -259,17 +259,6 @@ class FSDPActorConfig(ActorConfig):
     use_remove_padding: bool = False
     profiler: ProfilerConfig = field(default_factory=ProfilerConfig)
     use_rollout_log_probs: bool = False
-    
-    apply_rectification: bool = False
-    apply_early_weighted_stability: bool = False
-    apply_hook_attention: bool = False
-
-    # Reward shaping knobs — see ActorConfig for full docstring.
-    stability_reward_penalty: float = 0.02
-    stability_reward_scale: float = 0.1
-    stability_reward_sensitivity: float = 5.0
-    suppression_reward_beta: float = 0.5
-    suppression_reward_scale: float = 1.0
 
     def __post_init__(self):
         """Validate FSDP actor configuration parameters."""

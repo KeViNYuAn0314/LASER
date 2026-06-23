@@ -91,8 +91,6 @@ class NaiveRewardManager(AbstractRewardManager):
                 extra_info=extra_info,
             )
 
-            ############ Add attention score
-            # print(f"Computing score in naive reward manager...", flush=True)
             if "attention_score" in data_item.batch:
                 attention_score = data_item.batch["attention_score"]
                 score["attention_score"] = attention_score.item()
@@ -100,13 +98,10 @@ class NaiveRewardManager(AbstractRewardManager):
             if isinstance(score, dict):
                 if "attention_score" in score:
                     reward = score["score"] + 0.5 * score["attention_score"] * score['accuracy']
-                    # print(f"detect attention score {score['attention_score']}, final reward is {reward}")
                 else:
-                    # print(f"no attention score detected")
                     reward = score["score"]
-                    
+
                 # Store the information including original reward
-                # reward_extra_info["attention_ratio"].append(attention_score.item())
                 for key, value in score.items():
                     reward_extra_info[key].append(value)
             else:
