@@ -257,7 +257,6 @@ def get_full_attention(
                 diagonal=1  # Mask out upper triangle (future tokens)
             )
             attn_scores = attn_scores + causal_mask
-        attn_scores = attn_scores + causal_mask
 
         # Apply softmax to get probabilities
         attn_weights = F.softmax(attn_scores, dim=-1, dtype=torch.float32).to(query_states.dtype)
