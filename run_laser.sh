@@ -85,6 +85,11 @@ python3 -m verl.trainer.main_ppo \
     +data.gen_batch_size=${TRAIN_BATCH_SIZE} \
     custom_reward_function.path="${REWARD_FN_PATH}" \
     custom_reward_function.name=compute_score_vanilla \
+    +reward_model.reward_kwargs.overlong_buffer_cfg.enable=False \
+    +reward_model.reward_kwargs.overlong_buffer_cfg.len=${MAX_RESPONSE_LENGTH} \
+    +reward_model.reward_kwargs.overlong_buffer_cfg.penalty_factor=1.0 \
+    +reward_model.reward_kwargs.overlong_buffer_cfg.log=False \
+    +reward_model.reward_kwargs.max_resp_len=${MAX_RESPONSE_LENGTH} \
     actor_rollout_ref.model.path="${MODEL_PATH}" \
     actor_rollout_ref.actor.optim.lr=${ACTOR_LR} \
     actor_rollout_ref.actor.optim.warmup_style=constant \
