@@ -103,6 +103,14 @@ Then point `TRAIN_FILES` / `VAL_FILES` in `train.sh` at them.
 
 ## 🚀 Training
 
+LASER follows a two-stage post-training pipeline:
+
+### Stage 1 — Cold-start SFT (optional)
+
+Following [Revisual-R1](https://arxiv.org/abs/2506.04207), we first cold-start `Qwen2.5-VL-7B-Instruct` with supervised fine-tuning (2 epochs) to strengthen reasoning ability before reinforcement learning. We adopt the Revisual-R1 cold-start pipeline — please refer to their official release to produce the SFT checkpoint. This stage is **optional**: you can run Stage 2 directly from `Qwen2.5-VL-7B-Instruct`, but using the cold-start checkpoint as `MODEL_PATH` reproduces our main setup.
+
+### Stage 2 — GRPO with LASER rewards
+
 Edit the paths at the top of [`train.sh`](train.sh) (or pass them as environment variables) and launch:
 
 ```bash
