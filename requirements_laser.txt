@@ -1,0 +1,64 @@
+# ============================================================================
+# LASER environment — pinned to the Docker/Apptainer image used in the paper.
+# Base: CUDA 12.8 · PyTorch 2.8.0 · vLLM 0.11.0
+#
+# NOTE: vLLM, FlashInfer and flash-attn are compiled against CUDA 12.8 and are
+# easiest to obtain from the provided container image. If building your own
+# environment, install PyTorch from the cu128 index first, e.g.:
+#   pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
+#       --index-url https://download.pytorch.org/whl/cu128
+# then `pip install -r requirements_laser.txt && pip install -e .`
+# ============================================================================
+
+# --- Core DL ---
+torch==2.8.0
+torchvision==0.23.0
+torchaudio==2.8.0
+torchdata==0.11.0
+torchmetrics==1.9.0
+triton==3.4.0
+
+# --- Transformers / model stack ---
+# transformers is PINNED on purpose: the hook-based attention capture mirrors
+# Qwen2.5-VL's attention forward from transformers 4.57.6.
+transformers==4.57.6
+tokenizers==0.22.1
+accelerate==1.10.1
+peft==0.18.1
+safetensors==0.6.2
+sentencepiece==0.2.1
+datasets==4.0.0
+
+# --- Inference / RL engines ---
+vllm==0.11.0              # compiled in the container (see note above)
+flash-attn==2.8.1         # prebuilt CUDA 12.8 wheel
+# flashinfer-python       # compiled in the container
+xformers==0.0.32.post1
+ray==2.50.0
+tensordict==0.10.0
+deepspeed==0.18.9
+liger-kernel==0.6.3
+
+# --- verl / config / utils ---
+hydra-core==1.3.2
+omegaconf==2.3.0
+codetiming==1.4.0
+dill==0.3.8
+einops==0.8.1
+
+# --- Vision / multimodal ---
+qwen-vl-utils==0.0.14
+pillow==11.3.0
+opencv-python-headless==4.12.0.88
+
+# --- Reward / math verification ---
+math-verify==0.9.0
+mathruler==0.1.0
+latex2sympy2_extended==1.11.0
+sympy==1.14.0
+
+# --- Data / logging ---
+numpy==1.26.4
+pandas==2.3.3
+pyarrow==22.0.0
+wandb==0.22.3
