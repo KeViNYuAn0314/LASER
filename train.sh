@@ -1,43 +1,57 @@
 #!/usr/bin/env bash
 # ============================================================================
-# LASER: attention-guided RL for VLMs (built on verl).
-# During training the actor retrieves Qwen2.5-VL self-attention and turns the
-# description->visual-token attention into stability / rectification /
-# sink-suppression reward signals that reweight the RL objective.
+# LASER: A Corrective Lens for LVLMs via Visual Attention Preservation and
+#        Sink Suppression
 #
-# All machine-specific paths are parameters below; override via environment,
-# e.g.   MODEL_PATH=/path/to/model N_GPUS=4 bash run_laser.sh
-# A small smoke test is available with   DEBUG=True bash run_laser.sh
+# GRPO post-training stage. During rollout the actor extracts the model's
+# visual self-attention and converts it into two complementary rewards:
+#   * Visual Grounding Reward  (R_vis)  - sustains attention on informative,
+#     non-sink visual tokens across decoding steps.
+#   * Sink Suppression Reward  (R_supp) - penalizes attention concentration
+#     on task-irrelevant visual "sink" tokens.
+# Both are gated by answer correctness and added to the accuracy reward.
+#
+# Built on the verl RL framework. Reference model: Qwen2.5-VL-7B-Instruct.
+#
+# Usage:
+#   1. Edit the paths in the "REQUIRED" block below (or pass them as env vars).
+#   2. bash train.sh
+#   Any field can be overridden on the command line, e.g.
+#      N_GPUS=8 ACTOR_LR=1e-6 bash train.sh
+#   Extra Hydra overrides can be appended:
+#      bash train.sh actor_rollout_ref.rollout.gpu_memory_utilization=0.5
 # ============================================================================
 set -x
 
-# Resolve the repo root from this script's location so the custom reward
-# function always points at THIS repo's copy (no hardcoded absolute path).
+# Resolve repo root so the custom reward function points at this repo's copy.
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# ----------------------------- paths (override me) --------------------------
-MODEL_PATH=${MODEL_PATH:-"Qwen/Qwen2.5-VL-7B-Instruct"}
-TRAIN_FILES=${TRAIN_FILES:-"${REPO_DIR}/data/train.parquet"}
-VAL_FILES=${VAL_FILES:-"${REPO_DIR}/data/val.parquet"}
-REWARD_FN_PATH=${REWARD_FN_PATH:-"${REPO_DIR}/verl/utils/reward_score/openr1_verl.py"}
+# ----------------------------- REQUIRED: set these --------------------------
+# Path to the policy model. Use the cold-start checkpoint to reproduce the
+# paper, or Qwen/Qwen2.5-VL-7B-Instruct to train from the instruct model.
+MODEL_PATH=${MODEL_PATH:-"/path/to/Qwen2.5-VL-7B-Instruct"}
+# Parquet files in verl's multimodal RL format (column `images` for images).
+TRAIN_FILES=${TRAIN_FILES:-"/path/to/train.parquet"}
+VAL_FILES=${VAL_FILES:-"/path/to/val.parquet"}
+# Where checkpoints and logs are written.
 OUTPUT_DIR=${OUTPUT_DIR:-"${REPO_DIR}/checkpoints"}
 
 PROJECT_NAME=${PROJECT_NAME:-"laser"}
 EXP_NAME=${EXP_NAME:-"qwen2_5_vl_7b_laser"}
 
-# ----------------------------- resources (override me) ----------------------
-N_GPUS=${N_GPUS:-2}
+# ----------------------------- resources ------------------------------------
+N_GPUS=${N_GPUS:-4}              # GPUs per node (paper uses 4x H100)
 NNODES=${NNODES:-1}
-INFER_TP=${INFER_TP:-2}          # vllm tensor parallel size
+INFER_TP=${INFER_TP:-2}          # vLLM tensor-parallel size (must divide N_GPUS)
 NUM_CPUS=${NUM_CPUS:-20}         # ray init cpus
 
-# ----------------------------- LASER method switches ------------------------
-ENABLE_ATTENTION=${ENABLE_ATTENTION:-True}             # master switch for the LASER attention reward
-APPLY_HOOK_ATTENTION=${APPLY_HOOK_ATTENTION:-True}     # hook-based capture (memory-efficient) vs output_attentions
-APPLY_RECTIFICATION=${APPLY_RECTIFICATION:-True}       # sink-token rectification
-APPLY_SINK_SUPPRESSION=${APPLY_SINK_SUPPRESSION:-True} # sink-suppression reward (requires rectification)
-APPLY_EARLY_WEIGHTED_STABILITY=${APPLY_EARLY_WEIGHTED_STABILITY:-True}  # early-weighted vs uniform stability
-ATTENTION_START_STEP=${ATTENTION_START_STEP:-20}       # begin attention reward at this global step
+# ----------------------------- LASER switches -------------------------------
+ENABLE_ATTENTION=${ENABLE_ATTENTION:-True}              # master switch for the attention rewards
+APPLY_HOOK_ATTENTION=${APPLY_HOOK_ATTENTION:-True}      # memory-efficient hook-based attention capture
+APPLY_RECTIFICATION=${APPLY_RECTIFICATION:-True}        # identify visual sink tokens
+APPLY_SINK_SUPPRESSION=${APPLY_SINK_SUPPRESSION:-True}  # R_supp  (requires rectification)
+APPLY_EARLY_WEIGHTED_STABILITY=${APPLY_EARLY_WEIGHTED_STABILITY:-True}  # R_vis with early-stage emphasis
+ATTENTION_START_STEP=${ATTENTION_START_STEP:-20}        # begin the attention rewards at this global step
 
 # ----------------------------- training hyperparameters ---------------------
 TRAIN_BATCH_SIZE=${TRAIN_BATCH_SIZE:-512}
@@ -45,27 +59,11 @@ PPO_MINI_BATCH_SIZE=${PPO_MINI_BATCH_SIZE:-256}
 MAX_PROMPT_LENGTH=${MAX_PROMPT_LENGTH:-2048}
 MAX_RESPONSE_LENGTH=${MAX_RESPONSE_LENGTH:-2048}
 ACTOR_LR=${ACTOR_LR:-2e-6}
-ROLLOUT_N=${ROLLOUT_N:-8}
-TOTAL_EPOCHS=${TOTAL_EPOCHS:-3}
+ROLLOUT_N=${ROLLOUT_N:-8}        # rollouts per prompt (GRPO group size)
+TOTAL_EPOCHS=${TOTAL_EPOCHS:-2}
 SAVE_FREQ=${SAVE_FREQ:-10}
 TEST_FREQ=${TEST_FREQ:-10}
 VAL_BEFORE_TRAIN=${VAL_BEFORE_TRAIN:-False}
-
-# ----------------------------- debug / smoke test ---------------------------
-# DEBUG=True shrinks everything for a quick end-to-end runnability check and
-# turns the attention reward on from step 0.
-if [ "${DEBUG:-False}" = "True" ]; then
-    echo "===== DEBUG (smoke test) ====="
-    TRAIN_BATCH_SIZE=8
-    PPO_MINI_BATCH_SIZE=8
-    ROLLOUT_N=2
-    MAX_RESPONSE_LENGTH=512
-    TOTAL_EPOCHS=1
-    SAVE_FREQ=-1
-    TEST_FREQ=-1
-    VAL_BEFORE_TRAIN=False
-    ATTENTION_START_STEP=0
-fi
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -83,7 +81,7 @@ python3 -m verl.trainer.main_ppo \
     data.truncation=error \
     data.image_key=images \
     +data.gen_batch_size=${TRAIN_BATCH_SIZE} \
-    custom_reward_function.path="${REWARD_FN_PATH}" \
+    custom_reward_function.path="${REWARD_FN_PATH:-${REPO_DIR}/verl/utils/reward_score/openr1_verl.py}" \
     custom_reward_function.name=compute_score_vanilla \
     +reward_model.reward_kwargs.overlong_buffer_cfg.enable=False \
     +reward_model.reward_kwargs.overlong_buffer_cfg.len=${MAX_RESPONSE_LENGTH} \
@@ -121,9 +119,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.rollout.n=${ROLLOUT_N} \
     actor_rollout_ref.rollout.enforce_eager=True \
     actor_rollout_ref.rollout.free_cache_engine=True \
-    actor_rollout_ref.rollout.val_kwargs.temperature=0.7 \
+    actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
-    actor_rollout_ref.rollout.val_kwargs.top_k=20 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=20 \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     +actor_rollout_ref.actor.apply_hook_attention=${APPLY_HOOK_ATTENTION} \

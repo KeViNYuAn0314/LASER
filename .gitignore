@@ -140,3 +140,6 @@ out_files/
 
 # research scratch / internal dashboards
 research_html/
+
+# anonymous submission PDF (not for public repo)
+1088_LASER_A_Corrective_Lens_f.pdf
