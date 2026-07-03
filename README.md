@@ -4,9 +4,8 @@
 
 ### ECCV 2026
 
-[![arXiv](https://img.shields.io/badge/arXiv-XXXX.XXXXX-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/XXXX.XXXXX)
-[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white)](https://github.com/<user>/LASER)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+[![arXiv](https://img.shields.io/badge/arXiv-2607.01707-b31b1b?logo=arxiv&logoColor=white)](https://arxiv.org/abs/2607.01707)
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?logo=github&logoColor=white)](https://github.com/KeViNYuAn0314/LASER)
 
 </div>
 
@@ -16,56 +15,36 @@ LASER is a GRPO post-training framework that mitigates **visual forgetting** in 
 
 ## 📰 News
 
-- **[2026.xx]** 🎉 LASER is accepted to **ECCV 2026**.
+- **[2026.06]** 🎉 LASER is accepted to **ECCV 2026**.
 - **[2026.06]** 🚀 Code and training scripts released.
-- **[2026.xx]** 📄 arXiv preprint released. *(link coming soon)*
 
 ---
 
 ## 🔍 Overview
 
-LVLMs reason well but progressively **drift away from the image** during long chains of thought. We trace this *visual forgetting* to two overlooked causes:
+LVLMs reason well but progressively drift away from the image during long chains of thought. We trace this *visual forgetting* to two overlooked causes:
 
-- **When (temporal):** decay that begins in **early decoding** is the most damaging — a single early-stage suppression drops MMStar accuracy 62.8% → 48.9%, while the same late intervention costs only ~2%. Early errors propagate autoregressively.
-- **Where (distributional):** even when total visual attention is preserved, it **collapses onto a few task-irrelevant "sink" tokens** (2–3× the average per-token attention).
+- **When (temporal):** decay that begins in early decoding is the most damaging.
+- **Where (distributional):** even when total visual attention is preserved, it collapses onto a few task-irrelevant "sink" tokens.
 
 <p align="center">
   <img src="assets/teaser.png" width="80%" alt="Visual forgetting illustration"/>
 </p>
 
-**LASER** addresses both with two attention-derived rewards, added to the accuracy reward and **gated by answer correctness**:
-
-- **Visual Grounding Reward (R<sub>vis</sub>)** — sustains attention on informative, *non-sink* visual tokens across decoding (with early-stage emphasis).
-- **Sink Suppression Reward (R<sub>supp</sub>)** — penalizes attention concentration on visual *sink* tokens, redistributing it to meaningful regions.
+**LASER** addresses both with two attention-derived rewards.
 
 <p align="center">
   <img src="assets/framework.png" width="92%" alt="LASER framework"/>
 </p>
 
-On 8 benchmarks (Qwen2.5-VL-7B base) LASER reaches a new best of **64.1 on MMStar**, **+3.3** on HallusionBench, and its largest margin on **MathVision (+12.7)**.
-
-<details>
-<summary>Full results table</summary>
-
-| Model | MathVista | MathVerse | MathVision | WeMath | MMMU | MMStar | LogicVista | HallusionBench |
-|---|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
-| Qwen2.5-VL-7B (base) | 66.7 | 40.7 | 26.4 | 33.1 | 52.7 | 54.9 | 42.6 | 53.6 |
-| VisionR1-7B | 73.5 | 52.4 | 28.2 | 41.6 | 57.6 | 61.4 | 49.7 | 49.5 |
-| R1-Onevision-7B | 64.1 | 46.4 | 29.9 | **44.6** | 54.3 | 54.1 | 45.6 | 52.5 |
-| OpenVLThinker-7B | 72.3 | 50.3 | 25.9 | – | – | 61.9 | – | 52.2 |
-| Reflection-V-7B | 73.3 | – | 33.9 | – | 61.3 | – | – | 53.9 |
-| VAPO-Thinker-7B | 75.6 | 53.3 | 31.9 | 43.6 | 60.2 | 63.0 | 50.9 | 57.4 |
-| **LASER (Ours)** | 72.9 | **55.2** | **44.6** | 44.4 | **62.1** | **64.1** | **51.2** | **60.7** |
-
-</details>
 
 ---
 
 ## ⚙️ Getting Started
 
-LASER is built on the [verl](https://github.com/volcengine/verl) RL framework and targets **Qwen2.5-VL** on CUDA 12.8 (PyTorch 2.8.0, vLLM 0.11.0).
+LASER is built on the [verl](https://github.com/volcengine/verl) RL framework and targets Qwen2.5-VL on CUDA 12.8 (PyTorch 2.8.0, vLLM 0.11.0).
 
-**Option A — Container (recommended).** Use a vLLM 0.11.0 / CUDA 12.8 image (which already ships compiled `vllm`, `flashinfer`, and `flash-attn`), mount this repo, and install it:
+**Container.** Use a vLLM 0.11.0 / CUDA 12.8 image (which already ships compiled `vllm`, `flashinfer`, and `flash-attn`), mount this repo, and install it:
 
 ```bash
 git clone https://github.com/<user>/LASER.git
@@ -73,41 +52,18 @@ cd LASER
 pip install -e .
 ```
 
-**Option B — Your own environment.** Install PyTorch from the cu128 index, then the pinned dependencies:
 
-```bash
-pip install torch==2.8.0 torchvision==0.23.0 torchaudio==2.8.0 \
-    --index-url https://download.pytorch.org/whl/cu128
-pip install -r requirements_laser.txt
-pip install -e .
-```
+> `transformers==4.57.6` is pinned on purpose — the hook-based attention capture mirrors Qwen2.5-VL's attention forward from that version. 
 
-> `transformers==4.57.6` is pinned on purpose — the hook-based attention capture mirrors Qwen2.5-VL's attention forward from that version. `vllm`, `flashinfer`, and `flash-attn` are compiled and are easiest to get from the container.
-
----
-
-## 📦 Dataset
-
-LASER trains on **~45K multimodal RL samples** curated from publicly available reasoning datasets (e.g., Revisual-R1).
-
-Provide your data as **verl-format parquet files** — one row per sample with:
-- an `images` column (the image or list of images),
-- the prompt/question,
-- the ground-truth answer (used by the accuracy reward).
-
-Then point `TRAIN_FILES` / `VAL_FILES` in `train.sh` at them.
-
-> 📥 *Processed training/validation parquet files: link coming soon.*
 
 ---
 
 ## 🚀 Training
 
-LASER follows a two-stage post-training pipeline:
 
 ### Stage 1 — Cold-start SFT (optional)
 
-Following [Revisual-R1](https://arxiv.org/abs/2506.04207), we first cold-start `Qwen2.5-VL-7B-Instruct` with supervised fine-tuning (2 epochs) to strengthen reasoning ability before reinforcement learning. We adopt the Revisual-R1 cold-start pipeline — please refer to their official release to produce the SFT checkpoint. This stage is **optional**: you can run Stage 2 directly from `Qwen2.5-VL-7B-Instruct`, but using the cold-start checkpoint as `MODEL_PATH` reproduces our main setup.
+Following [Revisual-R1](https://arxiv.org/abs/2506.04207), we first cold-start `Qwen2.5-VL-7B-Instruct` with supervised fine-tuning (2 epochs) to strengthen reasoning ability before reinforcement learning. We adopt the Revisual-R1 cold-start pipeline — please refer to their official release to produce the SFT checkpoint.
 
 ### Stage 2 — GRPO with LASER rewards
 
@@ -120,19 +76,6 @@ VAL_FILES=/path/to/val.parquet \
 N_GPUS=4 INFER_TP=2 \
 bash train.sh
 ```
-
-The LASER rewards are toggled by these flags (all exposed in `train.sh`):
-
-| Flag | Component |
-|---|---|
-| `+trainer.enable_attention` | master switch for the attention rewards |
-| `+actor_rollout_ref.actor.apply_rectification` | identify visual **sink tokens** |
-| `+actor_rollout_ref.actor.apply_early_weighted_stability` | **Visual Grounding Reward** (R<sub>vis</sub>) |
-| `+actor_rollout_ref.actor.apply_sink_suppression` | **Sink Suppression Reward** (R<sub>supp</sub>) |
-| `+actor_rollout_ref.actor.apply_hook_attention` | memory-efficient hook-based attention capture |
-| `+trainer.attention_start_step` | step at which the attention rewards begin |
-
-The LASER code lives mainly in `verl/models/transformers/qwen2_vl.py` and `verl/workers/actor/attention_capture.py` (attention capture), `verl/workers/actor/dp_actor.py` (R<sub>vis</sub> / R<sub>supp</sub> scoring), and `verl/utils/reward_score/openr1_verl.py` (combined reward).
 
 **Evaluation.** Merge the FSDP checkpoint to HuggingFace format, then evaluate with [VLMEvalKit](https://github.com/open-compass/VLMEvalKit) (temperature 0.6, top-p 0.95):
 
@@ -151,14 +94,17 @@ LASER is built on top of the [verl](https://github.com/volcengine/verl) reinforc
 ## 📖 Citation
 
 ```bibtex
-@inproceedings{laser2026,
-  title     = {LASER: A Corrective Lens for LVLMs via Visual Attention Preservation and Sink Suppression},
-  author    = {<fill in author list>},
-  booktitle = {European Conference on Computer Vision (ECCV)},
-  year      = {2026}
+@misc{yuan2026lasercorrectivelenslvlms,
+      title={LASER: A Corrective Lens for LVLMs via Visual Attention Preservation and Sink Suppression}, 
+      author={Bowen Yuan and Zijian Wang and Yadan Luo and Shijie Wang and Zi Huang},
+      year={2026},
+      eprint={2607.01707},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2607.01707}, 
 }
 ```
 
 ## 📜 License
 
-Released under the [Apache 2.0 License](LICENSE), inherited from the upstream verl framework.
+Released under the [Apache 2.0 License](LICENSE).
